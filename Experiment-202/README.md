@@ -1,225 +1,209 @@
-# Experiment 202: Condition Variables and State Machine using Threads
+# Experiment 301: Message Passing between Client and Server in QNX
 
 ## Aim
 
-To implement a **multi-state machine using POSIX threads and condition variables** in QNX, where multiple threads synchronize using a shared state variable.
+To implement **inter-process communication using message passing in QNX**, where a client sends a string to a server and receives a checksum as a reply.
 
 ---
 
 ## Objective
 
-* To understand **thread synchronization using mutex and condition variables**.
-* To implement a **state machine with four states (0, 1, 2, 3)**.
-* To demonstrate **state transitions controlled by multiple threads**.
+* To understand **QNX message passing mechanism**.
+* To implement **client-server communication using ChannelCreate(), MsgSend(), MsgReceive(), and MsgReply()**.
+* To calculate and return a **checksum for a string sent by the client**.
 
 ---
 
 ## Problem Statement
 
-Design a multithreaded program where **four threads represent four states of a state machine**.
-All threads share a **common state variable, mutex, and condition variable**.
+Design a **QNX server and client program** where:
 
-The system should follow the transitions:
-
-```
-State 0 → State 1
-State 1 → State 2 (if internal variable is even)
-State 1 → State 3 (if internal variable is odd)
-State 2 → State 0
-State 3 → State 0
-```
-
-Each state is handled by a **separate thread**, and threads synchronize using **mutex locks and condition variables**.
+* The **server creates a communication channel** and waits for messages from clients.
+* The **client connects to the server using the server's PID and Channel ID**.
+* The client sends a **string message** to the server.
+* The server calculates a **checksum of the string**.
+* The server replies with the **calculated checksum**.
+* The client receives and prints the checksum.
 
 ---
 
 # Algorithm
 
-1. Start the program.
-2. Declare a **global state variable** initialized to **0**.
-3. Declare a **mutex and condition variable** for synchronization.
-4. Initialize the mutex and condition variable.
-5. Create **four threads**, each representing a state:
+## Server Algorithm
 
-   * Thread for **State 0**
-   * Thread for **State 1**
-   * Thread for **State 2**
-   * Thread for **State 3**
-6. Each thread runs continuously in a loop.
+1. Start the server program.
+2. Create a communication channel using `ChannelCreate()`.
+3. Obtain the process ID using `getpid()`.
+4. Display the server **PID and Channel ID**.
+5. Enter an infinite loop to receive messages from clients.
+6. Wait for a message using `MsgReceive()`.
+7. Check the received message type.
+8. If the message type is **checksum request**:
 
-### State 0 Thread
+   * Extract the string from the message.
+   * Call the checksum calculation function.
+9. Compute the checksum by summing ASCII values of characters in the string.
+10. Send the checksum back to the client using `MsgReply()`.
+11. If the message type is unknown, return an error using `MsgError()`.
+12. Continue waiting for the next message.
 
-7. Lock the mutex.
-8. Wait until the shared state becomes **0**.
-9. Print **"transit 0 → 1"**.
-10. Change the state to **1**.
-11. Broadcast the condition variable to wake other threads.
-12. Unlock the mutex.
-13. Delay briefly.
+---
 
-### State 1 Thread
+## Client Algorithm
 
-14. Lock the mutex.
-15. Wait until the state becomes **1**.
-16. Increment internal variable `i`.
-17. If `i` is **odd**, set state to **3**.
-18. If `i` is **even**, set state to **2**.
-19. Print **"transit 1 → state"**.
-20. Broadcast the condition variable.
-21. Unlock the mutex.
+1. Start the client program.
+2. Verify that command line arguments are provided.
+3. Read the following inputs from the arguments:
 
-### State 2 Thread
-
-22. Lock the mutex.
-23. Wait until the state becomes **2**.
-24. Print **"transit 2 → 0"**.
-25. Set the state to **0**.
-26. Broadcast the condition variable.
-27. Unlock the mutex.
-
-### State 3 Thread
-
-28. Lock the mutex.
-
-29. Wait until the state becomes **3**.
-
-30. Print **"transit 3 → 0"**.
-
-31. Set the state to **0**.
-
-32. Broadcast the condition variable.
-
-33. Unlock the mutex.
-
-34. Allow the threads to run for a fixed duration.
-
-35. Exit the program.
+   * Server PID
+   * Server Channel ID
+   * String to send.
+4. Establish a connection with the server using `ConnectAttach()`.
+5. Create a message structure containing the message type and string.
+6. Send the message to the server using `MsgSend()`.
+7. Wait for the server reply.
+8. Receive the checksum value from the server.
+9. Display the received checksum.
+10. Terminate the client program.
 
 ---
 
 # Program
 
+## Server Program (server.c)
+
 ```c
-/*
- * condvar.c
- */
-
 #include <stdio.h>
-#include <unistd.h>
-#include <sys/neutrino.h>
-#include <pthread.h>
-#include <sched.h>
-#include <errno.h>
-#include <string.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <sys/neutrino.h>
+#include <process.h>
+#include "msg_def.h"
 
-volatile int state;
+int calculate_checksum(char *text);
 
-pthread_mutex_t mutex;
-pthread_cond_t cond;
-
-void *state_0(void *);
-void *state_1(void *);
-void *state_2(void *);
-void *state_3(void *);
-
-int main()
+int main(void)
 {
-    int ret;
+    int chid;
+    int pid;
+    rcvid_t rcvid;
+    cksum_msg_t msg;
+    int status;
+    int checksum;
 
-    ret = pthread_mutex_init(&mutex, NULL);
-    if (ret != EOK) {
-        fprintf(stderr,"pthread_mutex_init failed: %s\n", strerror(ret));
+    chid = ChannelCreate(0);
+    if (chid == -1)
+    {
+        perror("ChannelCreate()");
         exit(EXIT_FAILURE);
     }
 
-    ret = pthread_cond_init(&cond, NULL);
-    if (ret != EOK) {
-        fprintf(stderr,"pthread_cond_init failed: %s\n", strerror(ret));
-        exit(EXIT_FAILURE);
+    pid = getpid();
+    printf("Server's pid: %d, chid: %d\n", pid, chid);
+
+    while (1)
+    {
+        rcvid = MsgReceive(chid, &msg, sizeof(msg), NULL);
+        if (rcvid == -1)
+        {
+            perror("MsgReceive");
+            exit(EXIT_FAILURE);
+        }
+
+        if (msg.msg_type == CKSUM_MSG_TYPE)
+        {
+            printf("Got a checksum message\n");
+
+            checksum = calculate_checksum(msg.string_to_cksum);
+
+            status = MsgReply(rcvid, EOK, &checksum, sizeof(checksum));
+            if (status == -1)
+                perror("MsgReply");
+        }
+        else
+        {
+            printf("Got an unknown message type %d\n", msg.msg_type);
+
+            if (MsgError(rcvid, ENOSYS) == -1)
+                perror("MsgError");
+        }
     }
 
-    state = 0;
-
-    pthread_create(NULL,NULL,state_1,NULL);
-    pthread_create(NULL,NULL,state_0,NULL);
-    pthread_create(NULL,NULL,state_2,NULL);
-    pthread_create(NULL,NULL,state_3,NULL);
-
-    sleep(20);
-    printf("main, exiting\n");
     return 0;
 }
 
-void *state_0(void *arg)
+int calculate_checksum(char *text)
 {
-    while(1)
-    {
-        pthread_mutex_lock(&mutex);
-        while(state != 0)
-            pthread_cond_wait(&cond,&mutex);
+    char *c;
+    int cksum = 0;
 
-        printf("transit 0 -> 1\n");
-        state = 1;
+    for (c = text; *c != '\0'; c++)
+        cksum += *c;
 
-        pthread_cond_broadcast(&cond);
-        pthread_mutex_unlock(&mutex);
-        delay(100);
-    }
+    return cksum;
 }
+```
 
-void *state_1(void *arg)
+---
+
+## Client Program (client.c)
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/neutrino.h>
+#include "msg_def.h"
+
+int main(int argc, char* argv[])
 {
-    int i = 1;
+    int coid;
+    cksum_msg_t msg;
+    int incoming_checksum;
+    int status;
+    int server_pid;
+    int server_chid;
 
-    while(1)
+    if (argc != 4)
     {
-        pthread_mutex_lock(&mutex);
-        while(state != 1)
-            pthread_cond_wait(&cond,&mutex);
-
-        if(++i & 0x1)
-            state = 3;
-        else
-            state = 2;
-
-        printf("transit 1 -> %d\n",state);
-
-        pthread_cond_broadcast(&cond);
-        pthread_mutex_unlock(&mutex);
+        printf("ERROR: This program must be started with commandline arguments\n");
+        printf("Example:\n");
+        printf("client 482834 1 abcdefghi\n");
+        exit(EXIT_FAILURE);
     }
-}
 
-void *state_2(void *arg)
-{
-    while(1)
+    server_pid = atoi(argv[1]);
+    server_chid = atoi(argv[2]);
+
+    printf("attempting to establish connection with server pid: %d, chid %d\n",
+           server_pid, server_chid);
+
+    coid = ConnectAttach(0, server_pid, server_chid, _NTO_SIDE_CHANNEL, 0);
+
+    if (coid == -1)
     {
-        pthread_mutex_lock(&mutex);
-        while(state != 2)
-            pthread_cond_wait(&cond,&mutex);
-
-        printf("transit 2 -> 0\n");
-        state = 0;
-
-        pthread_cond_broadcast(&cond);
-        pthread_mutex_unlock(&mutex);
+        perror("ConnectAttach");
+        exit(EXIT_FAILURE);
     }
-}
 
-void *state_3(void *arg)
-{
-    while(1)
+    msg.msg_type = CKSUM_MSG_TYPE;
+    strlcpy(msg.string_to_cksum, argv[3], sizeof(msg.string_to_cksum));
+
+    printf("Sending string: %s\n", msg.string_to_cksum);
+
+    status = MsgSend(coid, &msg, sizeof(msg),
+                     &incoming_checksum, sizeof(incoming_checksum));
+
+    if (status == -1)
     {
-        pthread_mutex_lock(&mutex);
-        while(state != 3)
-            pthread_cond_wait(&cond,&mutex);
-
-        printf("transit 3 -> 0\n");
-        state = 0;
-
-        pthread_cond_broadcast(&cond);
-        pthread_mutex_unlock(&mutex);
+        perror("MsgSend");
+        exit(EXIT_FAILURE);
     }
+
+    printf("received checksum=%d from server\n", incoming_checksum);
+    printf("MsgSend return status: %d\n", status);
+
+    return EXIT_SUCCESS;
 }
 ```
 
@@ -227,24 +211,23 @@ void *state_3(void *arg)
 
 # Expected Output
 
+### Server Side
+
 ```
-transit 0 -> 1
-transit 1 -> 2
-transit 2 -> 0
-transit 0 -> 1
-transit 1 -> 3
-transit 3 -> 0
-transit 0 -> 1
-transit 1 -> 2
-transit 2 -> 0
-transit 0 -> 1
-transit 1 -> 3
-transit 3 -> 0
-...
-main, exiting
+Server's pid: 12345, chid: 1
+Got a checksum message
 ```
 
-*(The sequence alternates between state 2 and state 3 depending on whether the counter is even or odd.)*
+### Client Side
+
+```
+attempting to establish connection with server pid: 12345, chid 1
+Sending string: abcdefghi
+received checksum=909 from server
+MsgSend return status: 0
+```
+
+*(The checksum value depends on the ASCII sum of characters in the string.)*
 
 ---
 
@@ -254,4 +237,5 @@ main, exiting
 
 # Result
 
-Thus, a **multi-state machine using POSIX threads, mutex, and condition variables** was successfully implemented and the **state transitions were executed correctly**.
+Thus, the **client-server communication using QNX message passing** was successfully implemented.
+The client sent a string to the server, and the server calculated and returned the **checksum correctly**.
