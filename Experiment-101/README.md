@@ -55,7 +55,7 @@ int main(void) {
 }
 ```
 ## Output
-![Output Image](exp1.png)
+![alt text](<Screenshot 2026-03-13 105317.png>)
 ---
 
 ## Result
