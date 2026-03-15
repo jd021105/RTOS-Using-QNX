@@ -248,7 +248,7 @@ MsgSend return status: 0
 ---
 
 # Output
-![alt text](images.jpg)
+
 
 ---
 
