@@ -250,6 +250,7 @@ main, exiting
 ---
 
 # Output
+![alt text](image.png)
 
 ---
 
