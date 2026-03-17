@@ -100,6 +100,10 @@ Interrupt received! , Count is 4
 ```
 
 *(The counter increases each time the interrupt occurs.)*
+---
+
+# Output
+![alt text](image.png)
 
 ---
 
